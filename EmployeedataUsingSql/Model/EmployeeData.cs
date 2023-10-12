@@ -29,5 +29,8 @@ namespace EmployeedataUsingSql.Model
         public string skill { get; set; }
         public int salary { get; set; }
 
+        //public string ProfilePicturePath { get; set; }
+
+
     }
 }

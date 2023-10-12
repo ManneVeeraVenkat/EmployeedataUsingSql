@@ -1,15 +1,105 @@
-﻿using EmployeedataUsingSql.Model;
+﻿using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using EmployeedataUsingSql.Model;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System.Configuration;
 
 namespace EmployeedataUsingSql.Data
 {
     public class EmployeeService
     {
         private readonly EmployeeDbContext _employeeDbContext;
-        public EmployeeService(EmployeeDbContext employeeDbContext)
+
+        private readonly BlobServiceClient _blobServiceClient;
+
+        //private const string EmployeeImageContainer = "employeeimage";
+        private readonly string _containerName;
+        public EmployeeService(EmployeeDbContext employeeDbContext,IConfiguration configuration)
         {
             _employeeDbContext = employeeDbContext;
+
+            var connectionString = configuration.GetConnectionString("BlobStorageConnection");
+            _containerName = configuration.GetValue<string>("ConnectionStrings:ContainerName");
+            _blobServiceClient = new BlobServiceClient(connectionString);
+
         }
+        public async Task<string> UploadProfilePic(IFormFile ProfielPic, string ProfileName )
+        {
+            if (ProfielPic == null || ProfielPic.Length == 0)
+            {
+                throw new ArgumentException("Invalid file");
+            }
+
+            try
+            {
+                // Generate a unique blob name, or you can use the user's ID or another identifier
+                //string uniqueBlobName = Guid.NewGuid().ToString();
+
+                // Create a BlobContainerClient
+                BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(_containerName);
+
+                // Get a BlobClient for the new blob
+                BlobClient blobClient = containerClient.GetBlobClient(ProfileName);
+
+                // Upload the file to Blob Storage with content type
+                await blobClient.UploadAsync(ProfielPic.OpenReadStream(), new BlobUploadOptions
+                {
+                    HttpHeaders = new BlobHttpHeaders
+                    {
+                        ContentType = ProfielPic.ContentType // Set the content type based on the file's MIME type
+                    }
+                });
+
+                // Return the URL of the uploaded blob
+                return blobClient.Uri.ToString();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Failed to upload profile picture: {ex.Message}");
+            }
+        }
+        public async Task<Stream> GetProfilePicAsync(string employeeID)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(_containerName);
+            var blobClient = containerClient.GetBlobClient(employeeID);
+
+            try
+            {
+                var response = await blobClient.DownloadAsync();
+                if (response != null)
+                {
+                    return response.Value.Content;
+                }
+            }
+            catch (RequestFailedException ex)
+            {
+                // Handle the case where the blob is not found (404 error)
+                if (ex.Status == 404)
+                {
+                    // Return null to indicate that the blob was not found
+                    return null;
+                }
+
+                // Handle other exceptions if necessary
+                // You can log the error, throw a custom exception, or take other actions
+                // ...
+            }
+
+            // Return null if any exceptions occur
+            return null;
+        }
+
+        //public async Task<Stream> DownloadFileAsync(string employeeID)
+        //{
+        //    var containerClient = _blobServiceClient.GetBlobContainerClient(_containerName);
+        //    var blobClient = containerClient.GetBlobClient(employeeID);
+        //    var response = await blobClient.DownloadAsync();
+        //    return response.Value.Content;
+        //}
+
+
         public async Task<EmployeeData> AddEmployee(EmployeeData employee)
         {
             var result = await _employeeDbContext.EmployeesData.AddAsync(employee);
@@ -35,10 +125,48 @@ namespace EmployeedataUsingSql.Data
             return null;
      
         }
+        public async Task<bool> DeleteProfilePic(string employeeId)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(_containerName);
+
+            var blobClient = containerClient.GetBlobClient(employeeId);
+
+            if (await blobClient.ExistsAsync())
+            {
+                await blobClient.DeleteAsync();
+                return true;
+            }
+
+            return false;
+
+        }
         public async Task<IEnumerable<EmployeeData>> GetEmpolyees()
         {
             return await _employeeDbContext.EmployeesData.ToListAsync();
         }
+        //public async Task<List<Stream>> GetAllProfilePicturesAsync()
+        //{
+        //    List<Stream> profilePictures = new List<Stream>();
+
+        //    var containerClient = _blobServiceClient.GetBlobContainerClient(_containerName);
+
+        //    // List all blobs in the container
+        //    await foreach (BlobItem blobItem in containerClient.GetBlobsAsync())
+        //    {
+        //        BlobClient blobClient = containerClient.GetBlobClient(blobItem.Name);
+
+        //        // Download the blob content as a stream
+        //        BlobDownloadInfo blobDownloadInfo = await blobClient.DownloadAsync();
+
+        //        if (blobDownloadInfo != null)
+        //        {
+        //            profilePictures.Add(blobDownloadInfo.Content);
+                 
+        //        }
+        //    }
+
+        //    return profilePictures;
+        //}
         public async Task<EmployeeData> UpdateEmployee(int employeeId, EmployeeData employeeData)
         {
             try
